@@ -1,25 +1,21 @@
 "use strict";
 const path = require("path");
-
 const electron = require("electron");
 const enhanceWebRequest = require("electron-better-web-request").default;
 const is = require("electron-is");
 const unhandled = require("electron-unhandled");
 const { autoUpdater } = require("electron-updater");
-
 const config = require("./config");
 const { setApplicationMenu } = require("./menu");
 const { fileExists, injectCSS } = require("./plugins/utils");
 const { isTesting } = require("./utils/testing");
 const { setUpTray } = require("./tray");
 const { setupSongInfo } = require("./providers/song-info");
-
 // Catch errors and log them
 unhandled({
 	logger: console.error,
 	showDialog: false,
 });
-
 const app = electron.app;
 app.commandLine.appendSwitch(
 	"js-flags",
@@ -33,33 +29,27 @@ if (config.get("options.disableHardwareAcceleration")) {
 	}
 	app.disableHardwareAcceleration();
 }
-
 if (config.get("options.proxy")) {
 	app.commandLine.appendSwitch("proxy-server", config.get("options.proxy"));
 }
-
 // Adds debug features like hotkeys for triggering dev tools and reload
 require("electron-debug")({
 	showDevTools: false //disable automatic devTools on new window
 });
-
 // Prevent window being garbage collected
 let mainWindow;
 autoUpdater.autoDownload = false;
-
 let icon = "assets/youtube-music.png";
 if (process.platform == "win32") {
 	icon = "assets/generated/icon.ico";
 } else if (process.platform == "darwin") {
 	icon = "assets/generated/icon.icns";
 }
-
 function onClosed() {
 	// Dereference the window
 	// For multiple windows store them in an array
 	mainWindow = null;
 }
-
 function loadPlugins(win) {
 	injectCSS(win.webContents, path.join(__dirname, "youtube-music.css"));
 	win.webContents.once("did-finish-load", () => {
@@ -68,7 +58,6 @@ function loadPlugins(win) {
 			win.webContents.openDevTools();
 		}
 	});
-
 	config.plugins.getEnabled().forEach(([plugin, options]) => {
 		console.log("Loaded plugin - " + plugin);
 		const pluginPath = path.join(__dirname, "plugins", plugin, "back.js");
@@ -78,13 +67,11 @@ function loadPlugins(win) {
 		});
 	});
 }
-
 function createMainWindow() {
 	const windowSize = config.get("window-size");
 	const windowMaximized = config.get("window-maximized");
 	const windowPosition = config.get("window-position");
 	const useInlineMenu = config.plugins.isEnabled("in-app-menu");
-
 	const win = new electron.BrowserWindow({
 		icon: icon,
 		width: windowSize.width,
@@ -123,21 +110,17 @@ function createMainWindow() {
 	if (windowMaximized) {
 		win.maximize();
 	}
-
 	const urlToLoad = config.get("options.resumeOnStart")
 		? config.get("url")
 		: config.defaultConfig.url;
 	win.webContents.loadURL(urlToLoad);
 	win.on("closed", onClosed);
-
 	win.on("move", () => {
 		let position = win.getPosition();
 		config.set("window-position", { x: position[0], y: position[1] });
 	});
-
 	win.on("resize", () => {
 		const windowSize = win.getSize();
-
 		config.set("window-maximized", win.isMaximized());
 		if (!win.isMaximized()) {
 			config.set("window-size", {
@@ -146,25 +129,22 @@ function createMainWindow() {
 			});
 		}
 	});
-
 	win.webContents.on("render-process-gone", (event, webContents, details) => {
 		showUnresponsiveDialog(win, details);
 	});
-
 	win.once("ready-to-show", () => {
 		if (config.get("options.appVisible")) {
 			win.show();
 		}
 	});
-
 	removeContentSecurityPolicy();
-
 	return win;
 }
-
 app.once("browser-window-created", (event, win) => {
 	setupSongInfo(win);
 	loadPlugins(win);
+
+	let actualUserAgent = win.webContents.userAgent;
 
 	win.webContents.on("did-fail-load", (
 		_event,
@@ -192,11 +172,9 @@ app.once("browser-window-created", (event, win) => {
 			win.webContents.loadFile(path.join(__dirname, "error.html"));
 		}
 	});
-
 	win.webContents.on("will-prevent-unload", (event) => {
 		event.preventDefault();
 	});
-
 	win.webContents.on("will-navigate", (_, url) => {
 		if (url.startsWith("https://accounts.google.com")) {
 			// Force user-agent "Firefox Windows" for Google OAuth to work
@@ -208,17 +186,24 @@ app.once("browser-window-created", (event, win) => {
 				mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:70.0) Gecko/20100101 Firefox/70.0",
 				windows: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0",
 				linux: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:90.0) Gecko/20100101 Firefox/90.0",
+				linux: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:94.0) Gecko/20100101 Firefox/94.0",
 			}
-			
+
 			const userAgent = 
 				is.macOS() ? userAgents.mac :
 				is.windows() ? userAgents.windows :
 				userAgents.linux;
 
+			// Also overwrite the user agent to prevent finding the actual user agent
+			win.webContents.userAgent = userAgent;
+
 			win.webContents.session.webRequest.onBeforeSendHeaders((details, cb) => {
 				details.requestHeaders["User-Agent"] = userAgent;
 				cb({ requestHeaders: details.requestHeaders });
 			});
+		} else {
+			// Restore the actual getUserAgent for everything else.
+			win.webContents.userAgent = actualUserAgent;
 		}
 	});
 
@@ -226,23 +211,19 @@ app.once("browser-window-created", (event, win) => {
 		"new-window",
 		(e, url, frameName, disposition, options) => {
 			// hook on new opened window
-
 			// at now new window in mainWindow renderer process.
 			// Also, this will automatically get an option `nodeIntegration=false`(not override to true, like in iframe's) - like in regular browsers
 			options.webPreferences.affinity = "main-window";
 		}
 	);
 });
-
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") {
 		app.quit();
 	}
-
 	// Unregister all shortcuts.
 	electron.globalShortcut.unregisterAll();
 });
-
 app.on("activate", () => {
 	// On OS X it's common to re-create a window in the app when the
 	// dock icon is clicked and there are no other windows open.
@@ -252,7 +233,6 @@ app.on("activate", () => {
 		mainWindow.show();
 	}
 });
-
 app.on("ready", () => {
 	if (config.get("options.autoResetAppCache")) {
 		// Clear cache after 20s
@@ -264,7 +244,6 @@ app.on("ready", () => {
 			clearTimeout(clearCacheTimeout);
 		}, 20000);
 	}
-
 	// Register appID on windows
 	if (is.windows()) {
 		const appID = "com.github.th-ch.youtube-music";
@@ -293,7 +272,6 @@ app.on("ready", () => {
 			}
 		}
 	}
-
 	mainWindow = createMainWindow();
 	setApplicationMenu(mainWindow);
 	if (config.get("options.restartOnConfigChanges")) {
@@ -303,12 +281,10 @@ app.on("ready", () => {
 		});
 	}
 	setUpTray(app, mainWindow);
-
 	// Autostart at login
 	app.setLoginItemSettings({
 		openAtLogin: config.get("options.startAtLogin"),
 	});
-
 	if (!is.dev() && config.get("options.autoUpdates")) {
 		const updateTimeout = setTimeout(() => {
 			autoUpdater.checkForUpdatesAndNotify();
@@ -340,7 +316,6 @@ app.on("ready", () => {
 			});
 		});
 	}
-
 	if (config.get("options.hideMenu") && !config.get("options.hideMenuWarned")) {
 		electron.dialog.showMessageBox(mainWindow, {
 			type: 'info', title: 'Hide Menu Enabled',
@@ -348,17 +323,14 @@ app.on("ready", () => {
 		});
 		config.set("options.hideMenuWarned", true);
 	}
-
 	// Optimized for Mac OS X
 	if (is.macOS() && !config.get("options.appVisible")) {
 		app.dock.hide();
 	}
-
 	let forceQuit = false;
 	app.on("before-quit", () => {
 		forceQuit = true;
 	});
-
 	if (is.macOS() || config.get("options.tray")) {
 		mainWindow.on("close", (event) => {
 			// Hide the window instead of quitting (quit is available in tray options)
@@ -369,7 +341,6 @@ app.on("ready", () => {
 		});
 	}
 });
-
 function showUnresponsiveDialog(win, details) {
 	if (!!details) {
 		console.log("Unresponsive Error!\n"+JSON.stringify(details, null, "\t"))
@@ -393,7 +364,6 @@ function showUnresponsiveDialog(win, details) {
 		}
 	});
 }
-
 function removeContentSecurityPolicy(
 	session = electron.session.defaultSession
 ) {
@@ -401,7 +371,6 @@ function removeContentSecurityPolicy(
 	// by enhancing the session.
 	// Some plugins (e.g. adblocker) also define a "onHeadersReceived" listener
 	enhanceWebRequest(session);
-
 	// Custom listener to tweak the content security policy
 	session.webRequest.onHeadersReceived(function (details, callback) {
 		if (
@@ -413,7 +382,6 @@ function removeContentSecurityPolicy(
 		delete details.responseHeaders["content-security-policy"];
 		callback({ cancel: false, responseHeaders: details.responseHeaders });
 	});
-
 	// When multiple listeners are defined, apply them all
 	session.webRequest.setResolver("onHeadersReceived", (listeners) => {
 		const response = listeners.reduce(
@@ -421,13 +389,11 @@ function removeContentSecurityPolicy(
 				if (accumulator.cancel) {
 					return accumulator;
 				}
-
 				const result = await listener.apply();
 				return { ...accumulator, ...result };
 			},
 			{ cancel: false }
 		);
-
 		return response;
 	});
 }
